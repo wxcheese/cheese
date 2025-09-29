@@ -16,53 +16,56 @@
 <p class="p1"><span class="s1">&lt;!DOCTYPE html&gt;</span></p>
 <p class="p1"><span class="s1">&lt;html lang="en"&gt;</span></p>
 <p class="p1"><span class="s1">&lt;head&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;meta charset="UTF-8" /&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;title&gt;WXCheese – A Place of Wishes&lt;/title&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;script src="https://cdn.tailwindcss.com"&gt;&lt;/script&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;style&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>body {</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>background: radial-gradient(circle at center, #000000, #1a1a1a, #000000);</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>height: 100vh;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>display: flex;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>justify-content: center;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>align-items: center;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>color: white;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>font-family: "Georgia", serif;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>text-align: center;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>}</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>.fade-in {</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>opacity: 0;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>animation: fadeIn 3s forwards;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>}</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>@keyframes fadeIn {</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>to { opacity: 1; }</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>}</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;/style&gt;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;meta charset="UTF-8" /&gt;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;title&gt;WXCheese – A Place of Wishes&lt;/title&gt;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;script src="https://cdn.tailwindcss.com"&gt;&lt;/script&gt;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;style&gt;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>body {</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>/* 使用径向渐变创建深空或奶酪的微光效果 */</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>background: radial-gradient(circle at center, #000000, #1a1a1a, #000000);</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>height: 100vh;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>display: flex;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>justify-content: center;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>align-items: center;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>color: white;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>font-family: "Georgia", serif; /* 保持原有的字体风格 */</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>text-align: center;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>}</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>.fade-in {</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>opacity: 0;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>animation: fadeIn 3s forwards; /* 延长淡入时间，使效果更优雅 */</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>}</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>@keyframes fadeIn {</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>to { opacity: 1; }</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>}</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;/style&gt;</span></p>
 <p class="p1"><span class="s1">&lt;/head&gt;</span></p>
 <p class="p1"><span class="s1">&lt;body&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;div id="wish" class="text-2xl md:text-4xl fade-in"&gt;&lt;/div&gt;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;!-- 用于显示祝福语的容器，使用 Tailwind CSS 设置响应式字体大小 --&gt;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;div id="wish" class="text-2xl md:text-4xl lg:text-5xl fade-in px-4"&gt;&lt;/div&gt;</span></p>
 <p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;script&gt;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>// 随机祝福语库（可扩展）</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>const wishes = [</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>"祝你今天好梦 🌙",<span class="Apple-converted-space">  </span>// Chinese</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>"May your smile light the world ✨", // English</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>"Que tus sueños sean dulces 🌸", // Spanish</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>"Que ton cœur soit en paix 💫", // French</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>"あなたの一日が光に包まれますように 🌿", // Japanese</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>"당신의 마음이 미소로 가득하길 🌷", // Korean</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>"Möge dein Herz voller Freude sein 🌞", // German</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>"أن يكون يومك مباركًا 🌹", // Arabic</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">      </span>"तुम्हारा दिन शुभ हो 🌼", // Hindi</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>];</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;script&gt;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>// 随机祝福语库（可扩展）</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>const wishes = [</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>"祝你今天好梦 🌙",<span class="Apple-converted-space">  </span>// Chinese</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>"May your smile light the world ✨", // English</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>"Que tus sueños sean dulces 🌸", // Spanish</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>"Que ton cœur soit en paix 💫", // French</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>"あなたの一日が光に包まれますように 🌿", // Japanese</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>"당신의 마음이 미소로 가득하길 🌷", // Korean</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>"Möge dein Herz voller Freude sein 🌞", // German</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>"أن يكون يومك مباركًا 🌹", // Arabic</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>"तुम्हारा दिन शुभ हो 🌼", // Hindi</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>"WXCheese 祝你幸福安康，万事如意 🧀", // Added one personalized wish</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>];</span></p>
 <p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>// 随机选一句</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>const randomWish = wishes[Math.floor(Math.random() * wishes.length)];</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>// 随机选一句</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>const randomWish = wishes[Math.floor(Math.random() * wishes.length)];</span></p>
 <p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>// 显示在页面</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>document.getElementById("wish").innerText = randomWish;</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">  </span>&lt;/script&gt;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>// 显示在页面</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>document.getElementById("wish").innerText = randomWish;</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>&lt;/script&gt;</span></p>
 <p class="p1"><span class="s1">&lt;/body&gt;</span></p>
 <p class="p1"><span class="s1">&lt;/html&gt;</span></p>
 </body>
