@@ -60,7 +60,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, collection, query, limit, orderBy, addDoc, serverTimestamp, setDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, onSnapshot, collection, query, limit, orderBy, addDoc, serverTimestamp, setDoc, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         setLogLevel('Debug'); // Enable Firestore logging
@@ -76,10 +76,54 @@
 
         let db = null;
         let auth = null;
-        let userId = null;
+        let userId = null; // This will hold the internal Firebase UID/Anonymous ID
         let currentLanguage = 'zh'; // Default language
 
         // --- Core Firebase Initialization and Authentication ---
+
+        /**
+         * Reads, increments, and updates the global session counter in Firestore.
+         * @param {object} dbInstance Firestore instance.
+         * @param {string} currentUserId The internal Firebase user ID.
+         */
+        const updateSessionCounter = async (dbInstance, currentUserId) => {
+            const counterPath = `artifacts/${appId}/public/data/metadata`;
+            const counterDocRef = doc(dbInstance, counterPath, 'global_session_counter');
+
+            try {
+                // 1. Read the current count
+                const docSnap = await getDoc(counterDocRef);
+                let currentCount = 0;
+                
+                if (docSnap.exists()) {
+                    currentCount = docSnap.data().count || 0;
+                }
+
+                const newCount = currentCount + 1;
+                
+                // 2. Update the document with the new count (simple increment)
+                await setDoc(counterDocRef, {
+                    count: newCount,
+                    lastSessionUserId: currentUserId,
+                    lastSessionTime: serverTimestamp()
+                }, { merge: false });
+
+                // 3. Update display to show the sequential session number (一期一会)
+                const displayId = `#${newCount}`;
+                document.getElementById('user-id-display').textContent = displayId;
+                
+                // Return the sequential count for use in other functions (like adding a wish)
+                return displayId; 
+
+            } catch (error) {
+                console.error("Failed to update global session counter:", error);
+                // Fallback display if counter fails
+                document.getElementById('user-id-display').textContent = 'ID Error';
+                return currentUserId.substring(0, 8); // Fallback to a shortened Firebase ID
+            }
+        };
+
+
         const initFirebase = async () => {
             if (Object.keys(firebaseConfig).length === 0) {
                 console.error("Firebase config is missing. Cannot initialize Firestore.");
@@ -99,19 +143,22 @@
                     console.log("Signed in anonymously.");
                 }
 
-                onAuthStateChanged(auth, (user) => {
+                // IMPORTANT: The session ID logic is moved inside the auth state change listener
+                onAuthStateChanged(auth, async (user) => {
                     if (user) {
-                        userId = user.uid;
-                        document.getElementById('user-id-display').textContent = userId;
-                        console.log("Auth State Changed. User ID:", userId);
-                        // Once authenticated, start the Wish Mountain listener
-                        setupWishMountainListener(db);
+                        userId = user.uid; // Internal Firebase ID
+                        console.log("Auth State Changed. User ID (Internal):", userId);
                     } else {
                         // Use a fallback UUID if auth fails (shouldn't happen in canvas)
                         userId = crypto.randomUUID();
-                        document.getElementById('user-id-display').textContent = 'Guest-' + userId.substring(0, 8);
-                        console.log("User signed out or authentication failed. Using fallback ID.");
+                        console.log("User signed out or authentication failed. Using fallback ID (Internal).");
                     }
+                    
+                    // 1. Update the Global Session Counter (一期一会)
+                    const sessionNumber = await updateSessionCounter(db, userId);
+
+                    // 2. Once authenticated and session number is retrieved, start the Wish Mountain listener
+                    setupWishMountainListener(db, sessionNumber);
                 });
 
             } catch (error) {
@@ -132,6 +179,7 @@
                 'island-buzhou-title': '不周山',
                 'island-buzhou-subtitle': '— 奇人异志 —',
                 'share-button': '将此智慧送给朋友',
+                'user-id-label': '本期编号', // NEW LABEL
                 
                 // Overlays
                 'ai-overlay-title': 'AI 管家: 禅定问答',
@@ -145,7 +193,9 @@
                 'wish-input-placeholder': '留下您的心愿、困惑或祝福 (不超过100字)...',
                 'wish-submit-btn': '发送你的愿望',
                 'wish-loading-status': '许愿中...',
-                
+                'wish-refine-btn': '✨ 愿力提炼',
+                'wish-refining': '正在提炼愿力...',
+
                 // Store
                 'store-overlay-title': '法物流通: 许愿材料',
                 'store-item-title': '高品质许愿黄纸',
@@ -160,6 +210,10 @@
                 'buzhou-story-1-content': '老僧在不周山闭关三十载，未曾开口言语。他只留下一幅字：“放下”——两个字，道尽世间万般法。他的故事不是关于修行，而是关于存在本身。留待您日后发现更多影像与文字。',
                 'buzhou-story-2-title': '【待续】云游道人：以梦入道',
                 'buzhou-story-2-content': '此处将记录一位能够进入他人梦境，以佛法点化迷津的云游道人的故事。他居无定所，行踪不定，唯有心诚者，方能在梦中相遇。敬请期待您未来亲自上传的奇人异士事迹。',
+                'buzhou-sketch-title': '✨ 奇人速写创作',
+                'buzhou-sketch-placeholder': '描述一位奇人异士 (例如: 一个会飞的卖豆腐的道士)...',
+                'buzhou-sketch-btn': '创作奇人录',
+                'buzhou-sketching': '正在撰写传奇...',
             },
             'en': {
                 // Main Islands
@@ -169,9 +223,10 @@
                 'island-wish-subtitle': '— Make a Wish —',
                 'island-store-title': 'Store',
                 'island-store-subtitle': '— Offerings —',
-                'island-buzhou-title': 'Hogwarts',
+                'island-buzhou-title': 'Buzhou Mountain',
                 'island-buzhou-subtitle': '— Tales of the Wise —',
                 'share-button': 'Share This Wisdom',
+                'user-id-label': 'Session No.', // NEW LABEL
                 
                 // Overlays
                 'ai-overlay-title': 'AI Butler: Zen Dialogue',
@@ -185,6 +240,8 @@
                 'wish-input-placeholder': 'Leave your wish, concern, or blessing (max 100 characters)...',
                 'wish-submit-btn': 'Send Your Wish',
                 'wish-loading-status': 'Wishing in progress...',
+                'wish-refine-btn': '✨ Refine Wish Power',
+                'wish-refining': 'Refining wish power...',
 
                 // Store
                 'store-overlay-title': 'Store: Offering Materials',
@@ -195,11 +252,15 @@
                 'store-mock-btn': 'Acquire Immediately (Simulated)',
 
                 // Buzhou
-                'buzhou-overlay-title': 'Hogwarts: Chronicle of the Extraordinary',
+                'buzhou-overlay-title': 'Buzhou Mountain: Chronicle of the Extraordinary',
                 'buzhou-story-1-title': '【First Recorded】The Old Monk: State of No-Name',
                 'buzhou-story-1-content': 'The old monk meditated in Buzhou Mountain for thirty years without uttering a word. He only left one calligraphy scroll: "Let Go"—two words that express the entirety of worldly Dharma. His story is not about practice, but about existence itself. More images and texts await your future discovery.',
                 'buzhou-story-2-title': '【To be Continued】Wandering Taoist: Entering the Path through Dreams',
                 'buzhou-story-2-content': 'This records the story of a wandering Taoist who can enter others\' dreams and enlighten the lost with Dharma. He has no fixed dwelling, and his whereabouts are unknown. Only the truly sincere may encounter him in their dreams. Look forward to future tales of extraordinary individuals uploaded by you.',
+                'buzhou-sketch-title': '✨ Extraordinary Person Sketch',
+                'buzhou-sketch-placeholder': 'Describe an extraordinary person (e.g., a flying tofu seller Taoist)...',
+                'buzhou-sketch-btn': 'Create Sketch',
+                'buzhou-sketching': 'Writing the legend...',
             }
         };
 
@@ -225,20 +286,23 @@
             
             // 2. Share Button
             document.getElementById('share-button-text').innerHTML = t['share-button'];
+            
+            // 3. User ID Label
+            document.getElementById('user-id-label').textContent = t['user-id-label'];
 
-            // 3. AI Overlay
+            // 4. AI Overlay
             document.getElementById('ai-overlay-title').textContent = t['ai-overlay-title'];
             document.getElementById('ai-input').placeholder = t['ai-input-placeholder'];
             document.getElementById('ai-submit-btn').textContent = t['ai-submit-btn'];
             document.getElementById('ai-status').textContent = t['ai-status'];
             
-            // 4. Wish Overlay
+            // 5. Wish Overlay
             document.getElementById('wish-overlay-title').textContent = t['wish-overlay-title'];
             document.getElementById('wish-list-loading').textContent = t['wish-list-loading'];
             document.getElementById('wish-input').placeholder = t['wish-input-placeholder'];
             document.getElementById('wish-submit-btn').textContent = t['wish-submit-btn'];
             
-            // 5. Store Overlay
+            // 6. Store Overlay
             document.getElementById('store-overlay-title').textContent = t['store-overlay-title'];
             document.getElementById('store-item-title').textContent = t['store-item-title'];
             document.getElementById('store-item-desc').textContent = t['store-item-desc'];
@@ -246,12 +310,16 @@
             document.getElementById('store-mock-desc').textContent = t['store-mock-desc'];
             document.getElementById('store-mock-btn').textContent = t['store-mock-btn'];
 
-            // 6. Buzhou Overlay
+            // 7. Buzhou Overlay
             document.getElementById('buzhou-overlay-title').textContent = t['buzhou-overlay-title'];
             document.getElementById('buzhou-story-1-title').textContent = t['buzhou-story-1-title'];
             document.getElementById('buzhou-story-1-content').textContent = t['buzhou-story-1-content'];
             document.getElementById('buzhou-story-2-title').textContent = t['buzhou-story-2-title'];
             document.getElementById('buzhou-story-2-content').textContent = t['buzhou-story-2-content'];
+            document.getElementById('buzhou-sketch-title').textContent = t['buzhou-sketch-title'];
+            document.getElementById('buzhou-sketch-input').placeholder = t['buzhou-sketch-placeholder'];
+            document.getElementById('buzhou-sketch-btn').textContent = t['buzhou-sketch-btn'];
+
 
             // Update main page title (with the new brand name)
             document.title = 'wxCheese – Where your smile grows and travels far';
@@ -332,6 +400,7 @@
                     }
                 }
             }
+            return null; // Should be unreachable but ensures function returns null if loop finishes
         };
 
         const setInitialQuote = async () => {
@@ -391,7 +460,12 @@
         const wishSubmitBtn = document.getElementById('wish-submit-btn');
         const wishForm = document.getElementById('wish-form');
         
-        const setupWishMountainListener = (dbInstance) => {
+        /**
+         * Sets up the real-time listener for wishes.
+         * @param {object} dbInstance Firestore instance.
+         * @param {string} currentSessionNumber The session number (e.g., #10).
+         */
+        const setupWishMountainListener = (dbInstance, currentSessionNumber) => {
             const path = `artifacts/${appId}/public/data/wishes`;
             const q = query(collection(dbInstance, path), orderBy("timestamp", "desc"), limit(20));
             const locale = currentLanguage === 'en' ? 'en-US' : 'zh-CN';
@@ -407,19 +481,39 @@
 
                 snapshot.docs.forEach(docSnapshot => {
                     const wish = docSnapshot.data();
+                    const wishId = docSnapshot.id;
                     // Use determined locale for time formatting
                     const time = wish.timestamp ? new Date(wish.timestamp.toDate()).toLocaleString(locale, { 
                         year: 'numeric', month: '2-digit', day: '2-digit', 
                         hour: '2-digit', minute: '2-digit' 
                     }) : (currentLanguage === 'en' ? 'Just now' : '刚刚');
+                    
+                    // Display refined wish if it exists in the document
+                    const refinedText = wish.refinedWish ? `<p class="mt-3 p-3 bg-zen-gold/10 text-zen-ink rounded-lg font-medium border-l-4 border-zen-gold">✨ ${wish.refinedWish}</p>` : '';
+                    
+                    // Display the stored session number as the public ID
+                    const displayId = wish.sessionNumber || 'N/A';
+
 
                     const wishElement = document.createElement('div');
-                    wishElement.className = "p-4 border-b border-zen-sand last:border-b-0 bg-white/50 backdrop-blur-sm rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300";
+                    wishElement.id = `wish-${wishId}`;
+                    wishElement.className = "p-4 border-b border-zen-sand last:border-b-0 bg-white/50 backdrop-blur-sm rounded-xl shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col";
                     wishElement.innerHTML = `
-                        <p class="text-lg text-zen-ink whitespace-pre-wrap">${wish.content}</p>
-                        <div class="text-xs mt-2 text-gray-500 flex justify-between">
-                            <span>${currentLanguage === 'en' ? 'Wisher ID' : '许愿者ID'}: ${wish.userId}</span> 
-                            <span>${time}</span>
+                        <p class="text-lg text-zen-ink whitespace-pre-wrap flex-grow">${wish.content}</p>
+                        ${refinedText}
+                        <div class="flex justify-between items-center mt-3 pt-3 border-t border-zen-sand">
+                            <button 
+                                onclick="refineWish('${encodeURIComponent(wish.content)}', '${wishId}')" 
+                                class="wish-refine-btn text-sm px-3 py-1 bg-zen-gold text-white rounded-full hover:bg-zen-gold/90 transition-colors"
+                                data-wish-id="${wishId}"
+                                ${wish.refinedWish ? 'disabled' : ''}
+                            >
+                                ${wish.refinedWish ? (currentLanguage === 'en' ? 'Refined' : '已提炼') : t['wish-refine-btn']}
+                            </button>
+                            <div class="text-xs text-gray-500 text-right">
+                                <span>${currentLanguage === 'en' ? 'Wisher Session' : '许愿编号'}: ${displayId}</span> 
+                                <span class="block">${time}</span>
+                            </div>
                         </div>
                     `;
                     fragment.appendChild(wishElement);
@@ -445,13 +539,18 @@
             const t = translations[currentLanguage];
             wishSubmitBtn.disabled = true;
             wishSubmitBtn.textContent = t['wish-loading-status'];
+            
+            // Get the public session number from the display
+            const sessionNumber = document.getElementById('user-id-display').textContent;
 
             try {
                 const path = `artifacts/${appId}/public/data/wishes`;
                 await addDoc(collection(db, path), {
                     content: wishContent,
-                    userId: userId,
-                    timestamp: serverTimestamp()
+                    userId: userId, // Internal Firebase UID
+                    sessionNumber: sessionNumber, // Public Session Number (一期一会)
+                    timestamp: serverTimestamp(),
+                    refinedWish: null // Initialize refinedWish field
                 });
                 wishInput.value = ''; // Clear input
                 console.log("Wish added successfully.");
@@ -464,6 +563,92 @@
             }
         });
 
+        // --- GEMINI API Feature 1: Wish Power Refinement ---
+
+        const WISH_REFINEMENT_SYSTEM_PROMPT = "你是一位许愿山的神秘力量。你的任务是分析用户的愿望，并将其转化为一句简短、积极、充满力量的禅宗诗句或肯定语。回复必须只包含提炼后的文本，不要有任何前缀或解释。目标语言必须是中文。";
+
+        window.refineWish = async (encodedContent, wishId) => {
+            if (!db || !wishId) return;
+
+            const originalContent = decodeURIComponent(encodedContent);
+            const t = translations[currentLanguage];
+            const btn = document.querySelector(`.wish-refine-btn[data-wish-id="${wishId}"]`);
+            
+            if (!btn || btn.disabled) return;
+            
+            btn.disabled = true;
+            const originalText = btn.textContent;
+            btn.textContent = t['wish-refining'];
+
+            if (API_KEY === "") {
+                showCustomMessage(currentLanguage === 'en' ? "API Key missing for refinement." : "缺少 API 密钥，无法提炼愿力。");
+                btn.disabled = false;
+                btn.textContent = originalText;
+                return; 
+            }
+
+            const userPrompt = `提炼此愿望的精髓: "${originalContent}"`;
+            
+            const payload = {
+                contents: [{ parts: [{ text: userPrompt }] }],
+                systemInstruction: {
+                    parts: [{ text: WISH_REFINEMENT_SYSTEM_PROMPT }]
+                },
+            };
+            
+            let refinedText = null;
+
+            const maxRetries = 3;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 429 && attempt < maxRetries - 1) {
+                            const delay = Math.pow(2, attempt) * 1000;
+                            await new Promise(res => setTimeout(res, delay));
+                            continue; // Retry
+                        }
+                        throw new Error(`API error: ${response.statusText}`);
+                    }
+
+                    const result = await response.json();
+                    refinedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                    break; // Success
+                } catch (error) {
+                    console.error("Wish Refinement API call failed:", error);
+                    if (attempt === maxRetries - 1) {
+                        showCustomMessage(currentLanguage === 'en' ? "Failed to refine wish. Try later." : "提炼失败，请稍后重试。");
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                        return;
+                    }
+                }
+            }
+            
+            if (refinedText) {
+                try {
+                    // Update Firestore with the refined wish
+                    const wishRef = doc(db, `artifacts/${appId}/public/data/wishes`, wishId);
+                    await setDoc(wishRef, { refinedWish: refinedText }, { merge: true });
+                    showCustomMessage(currentLanguage === 'en' ? "Wish refined and recorded!" : "愿力已提炼并记录！");
+                } catch (error) {
+                    console.error("Error updating refined wish to Firestore:", error);
+                    showCustomMessage(currentLanguage === 'en' ? "Refinement generated but failed to save." : "提炼成功但保存失败。");
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                }
+            } else {
+                showCustomMessage(currentLanguage === 'en' ? "Failed to receive refined text." : "未能接收到提炼后的文本。");
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
         // --- AI Butler (Gemini API) Logic ---
         const aiChatBox = document.getElementById('ai-chat-box');
         const aiInput = document.getElementById('ai-input');
@@ -472,11 +657,11 @@
 
         // Note: The AI Butler's system prompt is kept in Chinese to ensure its persona remains a 'Buddhist master' 
         // who speaks Chinese/provides guidance in a Zen style, as this is a specific feature.
-        const AI_BUTLER_SYSTEM_PROMPT = "你是一位充满慈悲和智慧的佛家大师，以简洁、温和、富有哲理的方式提供人生指导。所有回答必须基于佛法或禅宗的智慧，避免直接的世俗建议，而是引导对方从心性上找到答案。每次回复不超过100字。";
+        const AI_BUTLER_SYSTEM_PROMPT = "你是一位充满慈悲和智慧的佛家大师，以简洁、温和、富有哲理的方式提供人生指导。所有回答必须基于佛法或禅宗的智慧，避免直接的世俗建议，而是引导对方从心性上找到答案。每次回复不超过150字。";
         
         const createMessage = (text, sender) => {
             const messageEl = document.createElement('div');
-            messageEl.className = `p-3 rounded-lg max-w-[85%] mb-4 shadow-md ${sender === 'user' ? 'self-end bg-zen-gold/10 text-zen-ink' : 'self-start bg-zen-sand text-zen-ink'}`;
+            messageEl.className = `p-3 rounded-xl max-w-[85%] mb-4 shadow-md ${sender === 'user' ? 'self-end bg-zen-gold/10 text-zen-ink' : 'self-start bg-zen-sand text-zen-ink'}`;
             messageEl.textContent = text;
             aiChatBox.appendChild(messageEl);
             aiChatBox.scrollTop = aiChatBox.scrollHeight;
@@ -538,6 +723,92 @@
             aiInput.value = '';
             generateAIResponse(userQuery);
         });
+
+        // --- GEMINI API Feature 2: Extraordinary Person Sketch (Buzhou Mountain) ---
+        const buzhouSketchForm = document.getElementById('buzhou-sketch-form');
+        const buzhouSketchInput = document.getElementById('buzhou-sketch-input');
+        const buzhouSketchBtn = document.getElementById('buzhou-sketch-btn');
+        const buzhouSketchResults = document.getElementById('buzhou-sketch-results');
+
+        const BUZHOU_SKETCH_SYSTEM_PROMPT = "你是不周山的奇人异士录撰写者。根据用户提供的简短描述，撰写一篇充满禅意、奇幻或武侠色彩的短篇故事/传记。故事必须引人入胜，篇幅精简（不超过150字），且符合中文语境。";
+
+        const createBuzhouSketch = async (description) => {
+            if (API_KEY === "") {
+                showCustomMessage(currentLanguage === 'en' ? "API Key missing for sketch creation." : "缺少 API 密钥，无法创作奇人速写。");
+                return null;
+            }
+
+            const userPrompt = `根据以下描述撰写奇人传记: "${description}"`;
+            
+            const payload = {
+                contents: [{ parts: [{ text: userPrompt }] }],
+                systemInstruction: {
+                    parts: [{ text: BUZHOU_SKETCH_SYSTEM_PROMPT }]
+                },
+            };
+            
+            let sketchText = null;
+
+            const maxRetries = 3;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 429 && attempt < maxRetries - 1) {
+                            const delay = Math.pow(2, attempt) * 1000;
+                            await new Promise(res => setTimeout(res, delay));
+                            continue; // Retry
+                        }
+                        throw new Error(`API error: ${response.statusText}`);
+                    }
+
+                    const result = await response.json();
+                    sketchText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                    return sketchText;
+                } catch (error) {
+                    console.error("Buzhou Sketch API call failed:", error);
+                    if (attempt === maxRetries - 1) {
+                        return null;
+                    }
+                }
+            }
+            return null;
+        }
+
+        buzhouSketchForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const description = buzhouSketchInput.value.trim();
+            if (!description) return;
+
+            const t = translations[currentLanguage];
+            buzhouSketchBtn.disabled = true;
+            const originalText = buzhouSketchBtn.textContent;
+            buzhouSketchBtn.textContent = t['buzhou-sketching'];
+            
+            const sketch = await createBuzhouSketch(description);
+
+            if (sketch) {
+                const sketchElement = document.createElement('div');
+                sketchElement.className = "p-4 bg-zen-gold/10 rounded-xl shadow-md border-l-4 border-zen-gold animate-in fade-in";
+                sketchElement.innerHTML = `
+                    <h3 class="text-xl font-semibold mb-2">【AI速写】${description}</h3>
+                    <p class="text-gray-700 whitespace-pre-wrap">${sketch}</p>
+                `;
+                buzhouSketchResults.prepend(sketchElement);
+                buzhouSketchInput.value = '';
+                showCustomMessage(currentLanguage === 'en' ? "New legend recorded!" : "新传奇已录入！");
+            } else {
+                showCustomMessage(currentLanguage === 'en' ? "Failed to create sketch." : "创作速写失败。");
+            }
+
+            buzhouSketchBtn.disabled = false;
+            buzhouSketchBtn.textContent = originalText;
+        });
         
         // --- Main App Logic and Initialization ---
         document.addEventListener('DOMContentLoaded', async () => {
@@ -545,15 +816,13 @@
             updateUIForLanguage(lang);
             initFirebase();
             
-            // Initial AI greeting
-            const initialGreeting = translations[lang]['ai-initial-greeting'];
-            createMessage(initialGreeting, 'ai');
+            // Initial AI greeting is handled inside initFirebase after session number is set
         });
     </script>
     
     <!-- 用户ID显示区域 -->
     <div class="fixed top-2 right-4 text-xs text-gray-400 z-50">
-        User ID: <span id="user-id-display">Loading...</span>
+        <span id="user-id-label">本期编号</span>: <span id="user-id-display">Loading...</span>
     </div>
 
     <!-- 主画布区域 (Main Canvas) -->
@@ -597,7 +866,7 @@
                 <p id="island-store-subtitle" class="text-sm text-gray-600">— 黄纸供养 —</p>
             </div>
 
-            <!-- 岛屿 4: 不周山 (奇人异士) -->
+            <!-- 岛屿 4: 不周山 -->
             <div id="island-buzhou" onclick="showOverlay('buzhou')" class="island-card bg-zen-sand p-6 rounded-3xl text-center flex flex-col items-center justify-center min-h-[150px]">
                 <span class="text-4xl mb-2">✨</span>
                 <h3 id="island-buzhou-title" class="text-xl font-semibold">不周山</h3>
@@ -630,7 +899,7 @@
         </div>
     </div>
 
-    <!-- Overlay 2: 许愿山 (Wish Mountain) -->
+    <!-- Overlay 2: 许愿山 (Wish Mountain) - Added Refinement Feature -->
     <div id="overlay-wish" class="zoom-overlay fixed inset-0 bg-white/95 backdrop-blur-md flex justify-center items-center p-4">
         <div class="bg-white rounded-3xl shadow-2xl p-6 w-full max-w-3xl h-full max-h-[80vh] flex flex-col">
             <h2 id="wish-overlay-title" class="text-3xl font-bold text-zen-gold border-b pb-3 mb-4 flex justify-between items-center">
@@ -662,7 +931,7 @@
             </h2>
             <div class="space-y-6">
                 <div class="flex items-center space-x-4">
-                    <img src="https://placehold.co/100x100/DAA520/FFFFFF?text=黄纸" alt="黄纸" class="rounded-lg shadow-md">
+                    <img onerror="this.onerror=null; this.src='https://placehold.co/100x100/DAA520/FFFFFF?text=纸'" src="https://placehold.co/100x100/DAA520/FFFFFF?text=黄纸" alt="黄纸" class="rounded-lg shadow-md">
                     <div>
                         <h3 id="store-item-title" class="text-2xl font-semibold">高品质许愿黄纸</h3>
                         <p id="store-item-desc" class="text-gray-600">精选上等黄纸，用于书写心愿，心诚则灵。</p>
@@ -679,7 +948,7 @@
         </div>
     </div>
 
-    <!-- Overlay 4: 不周山 (Buzhou Mountain - Stories) -->
+    <!-- Overlay 4: 不周山 (Buzhou Mountain - Stories) - Added Sketch Feature -->
     <div id="overlay-buzhou" class="zoom-overlay fixed inset-0 bg-white/95 backdrop-blur-md flex justify-center items-center p-4">
         <div class="bg-white rounded-3xl shadow-2xl p-6 w-full max-w-4xl h-full max-h-[80vh] flex flex-col">
             <h2 id="buzhou-overlay-title" class="text-3xl font-bold text-zen-gold border-b pb-3 mb-4 flex justify-between items-center">
@@ -687,16 +956,31 @@
                 <button onclick="hideOverlay('buzhou')" class="text-gray-400 hover:text-zen-gold transition-colors text-2xl leading-none">&times;</button>
             </h2>
             <div class="flex-grow overflow-y-auto p-4 space-y-8">
-                
-                <div class="p-4 bg-zen-sand/30 rounded-xl shadow-md">
-                    <h3 id="buzhou-story-1-title" class="text-2xl font-semibold mb-2">【首位记录者】山中老僧：无名之境</h3>
-                    <img src="https://placehold.co/800x200/5A6D5A/FFFFFF?text=未来放置图片或视频" alt="占位图" class="w-full h-48 object-cover rounded-lg my-3">
-                    <p id="buzhou-story-1-content" class="text-gray-700">老僧在不周山闭关三十载，未曾开口言语。他只留下一幅字：“放下”——两个字，道尽世间万般法。他的故事不是关于修行，而是关于存在本身。留待您日后发现更多影像与文字。</p>
-                </div>
 
-                <div class="p-4 bg-zen-sand/30 rounded-xl shadow-md">
-                    <h3 id="buzhou-story-2-title" class="text-2xl font-semibold mb-2">【待续】云游道人：以梦入道</h3>
-                    <p id="buzhou-story-2-content" class="text-gray-700">此处将记录一位能够进入他人梦境，以佛法点化迷津的云游道人的故事。他居无定所，行踪不定，唯有心诚者，方能在梦中相遇。敬请期待您未来亲自上传的奇人异士事迹。</p>
+                <!-- AI Sketch Creation Form -->
+                <div class="p-6 bg-zen-sand rounded-2xl shadow-lg border border-zen-gold/30">
+                    <h3 id="buzhou-sketch-title" class="text-2xl font-bold mb-4 flex items-center">✨ 奇人速写创作</h3>
+                    <form id="buzhou-sketch-form" class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                        <input type="text" id="buzhou-sketch-input" placeholder="描述一位奇人异士 (例如: 一个会飞的卖豆腐的道士)..." class="flex-grow p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-zen-gold" required maxlength="50">
+                        <button type="submit" id="buzhou-sketch-btn" class="px-6 py-3 bg-zen-ink text-white font-semibold rounded-xl shadow-md hover:bg-zen-ink/90 transition-colors shrink-0">
+                            创作奇人录
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- AI Generated Sketches will appear here dynamically -->
+                <div id="buzhou-sketch-results" class="space-y-6">
+                    <!-- Existing Mock Stories -->
+                    <div class="p-4 bg-zen-sand/30 rounded-xl shadow-md">
+                        <h3 id="buzhou-story-1-title" class="text-2xl font-semibold mb-2">【首位记录者】山中老僧：无名之境</h3>
+                        <img onerror="this.onerror=null; this.src='https://placehold.co/800x200/5A6D5A/FFFFFF?text=未来放置图片或视频'" src="https://placehold.co/800x200/5A6D5A/FFFFFF?text=未来放置图片或视频" alt="占位图" class="w-full h-48 object-cover rounded-lg my-3">
+                        <p id="buzhou-story-1-content" class="text-gray-700">老僧在不周山闭关三十载，未曾开口言语。他只留下一幅字：“放下”——两个字，道尽世间万般法。他的故事不是关于修行，而是关于存在本身。留待您日后发现更多影像与文字。</p>
+                    </div>
+
+                    <div class="p-4 bg-zen-sand/30 rounded-xl shadow-md">
+                        <h3 id="buzhou-story-2-title" class="text-2xl font-semibold mb-2">【待续】云游道人：以梦入道</h3>
+                        <p id="buzhou-story-2-content" class="text-gray-700">此处将记录一位能够进入他人梦境，以佛法点化迷津的云游道人的故事。他居无定所，行踪不定，唯有心诚者，方能在梦中相遇。敬请期待您未来亲自上传的奇人异士事迹。</p>
+                    </div>
                 </div>
 
             </div>
@@ -725,8 +1009,30 @@
             if (overlay) {
                 overlay.classList.remove('active');
             }
-            document.body.style.overflow = 'auto'; // Re-enable background scroll
+            
+            // 检查是否还有其他浮层是活动的，如果没有，则重新启用背景滚动
+            const anyActive = Object.values(overlays).some(o => o.classList.contains('active'));
+            if (!anyActive) {
+                document.body.style.overflow = 'auto'; 
+            }
         }
+        
+        // 【已修复】点击浮层背景关闭浮层
+        document.addEventListener('click', (e) => {
+            Object.keys(overlays).forEach(key => {
+                const overlay = overlays[key];
+                
+                // 1. 检查浮层是否是活动的
+                if (overlay.classList.contains('active')) {
+                    
+                    // 2. 检查点击目标是否是浮层容器本身 (而不是内部的白色对话框)
+                    if (e.target === overlay) {
+                        // 点击发生在浮层背景上，隐藏浮层
+                        hideOverlay(key);
+                    }
+                }
+            });
+        });
 
         function copyQuote() {
             const quoteText = document.getElementById('initial-quote').textContent.trim();
@@ -757,14 +1063,18 @@
             if (!msgBox) {
                 msgBox = document.createElement('div');
                 msgBox.id = 'custom-message-box';
-                msgBox.className = 'fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-zen-ink text-white p-4 rounded-xl shadow-2xl transition-opacity duration-300 opacity-0 z-[100]';
+                msgBox.className = 'fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-zen-ink text-white p-4 rounded-xl shadow-2xl transition-opacity duration-300 opacity-0 z-[100] text-center max-w-xs';
                 document.body.appendChild(msgBox);
             }
             
             msgBox.textContent = message;
+            // Force reflow to restart transition
             msgBox.classList.remove('opacity-0');
+            void msgBox.offsetWidth; 
+            msgBox.classList.add('opacity-100');
             
             setTimeout(() => {
+                msgBox.classList.remove('opacity-100');
                 msgBox.classList.add('opacity-0');
             }, 3000); // Hide after 3 seconds
         }
