@@ -1,120 +1,605 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>许愿世界 Demo</title>
-  <style>
-    body, html {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      width: 100%;
-      overflow: hidden;
-      font-family: "Noto Serif SC", serif;
-      background: white;
-    }
-    #canvas {
-      width: 3000px;
-      height: 2000px;
-      position: relative;
-    }
-    .wisdom {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 28px;
-      text-align: center;
-      max-width: 600px;
-      color: #333;
-    }
-    .island {
-      width: 260px;
-      height: 180px;
-      border-radius: 50%;
-      background: #f0f8ff;
-      border: 3px solid #333;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      position: absolute;
-      font-size: 20px;
-      text-align: center;
-      transition: background 0.3s;
-    }
-    .island:hover {
-      background: #e0f0ff;
-    }
-    #island1 { top: 200px; left: 400px; }
-    #island2 { top: 200px; right: 400px; }
-    #island3 { bottom: 250px; left: 450px; }
-    #island4 { bottom: 250px; right: 450px; }
-    /* 子区域内容 */
-    .detail {
-      font-size: 24px;
-      padding: 20px;
-      max-width: 600px;
-      text-align: center;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>禅意画布 - 人生方向的指引</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'Noto Sans SC', 'sans-serif'],
+                    },
+                    colors: {
+                        'zen-white': '#FDFDFD',
+                        'zen-sand': '#EFEBE9',
+                        'zen-gold': '#DAA520',
+                        'zen-ink': '#333333',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            overflow: hidden; /* 防止主页面滚动 */
+            background-color: #FDFDFD;
+            min-height: 100vh;
+        }
+
+        /* 模拟画布和岛屿的过渡效果 */
+        .island-card {
+            transition: transform 0.5s ease-in-out, opacity 0.5s ease-in-out, box-shadow 0.3s ease;
+            cursor: pointer;
+        }
+        .island-card:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 放大进入（Modal/Overlay）效果 */
+        .zoom-overlay {
+            transition: opacity 0.4s ease-in-out, visibility 0.4s ease-in-out;
+            visibility: hidden;
+            opacity: 0;
+            z-index: 50;
+        }
+        .zoom-overlay.active {
+            visibility: visible;
+            opacity: 1;
+        }
+    </style>
 </head>
-<body>
-  <div id="viewport" style="width:100%; height:100%; overflow:hidden; position:relative;">
-    <div id="canvas">
-      <div class="wisdom" id="wisdomText"></div>
+<body class="font-sans text-zen-ink">
 
-      <div id="island1" class="island">🤖 AI 管家</div>
-      <div id="island2" class="island">🗻 许愿山</div>
-      <div id="island3" class="island">🛍️ 商店</div>
-      <div id="island4" class="island">🏯 不周山</div>
+    <!-- Firebase and Google API Dependencies -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, collection, query, limit, orderBy, addDoc, serverTimestamp, setDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        setLogLevel('Debug'); // Enable Firestore logging
+
+        // --- Global Firebase and API Configuration ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'zen-canvas-app';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        const AI_MODEL_NAME = "gemini-2.5-flash-preview-05-20";
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL_NAME}:generateContent`;
+        const API_KEY = ""; // Canvas provides this dynamically
+
+        let db = null;
+        let auth = null;
+        let userId = null;
+
+        // --- Core Firebase Initialization and Authentication ---
+        const initFirebase = async () => {
+            if (Object.keys(firebaseConfig).length === 0) {
+                console.error("Firebase config is missing. Cannot initialize Firestore.");
+                return;
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    console.log("Signed in with custom token.");
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously.");
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        document.getElementById('user-id-display').textContent = userId;
+                        console.log("Auth State Changed. User ID:", userId);
+                        // Once authenticated, start the Wish Mountain listener
+                        setupWishMountainListener(db);
+                    } else {
+                        // Use a fallback UUID if auth fails (shouldn't happen in canvas)
+                        userId = crypto.randomUUID();
+                        document.getElementById('user-id-display').textContent = 'Guest-' + userId.substring(0, 8);
+                        console.log("User signed out or authentication failed. Using fallback ID.");
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization or authentication error:", error);
+            }
+        };
+
+        // --- Wisdom Quote Data (Fallback) ---
+        const chineseQuotes = [
+            "心生种种法生，心灭种种法灭。——《华严经》",
+            "一切有为法，如梦幻泡影，如露亦如电，应作如是观。——《金刚经》",
+            "菩提本无树，明镜亦非台，本来无一物，何处惹尘埃。——六祖慧能",
+            "慈悲喜舍，是为四无量心，能除一切烦恼。——佛教语",
+            "境随心转，相由心生。一切福田，不离方寸。——佛教语",
+            "欲知前世因，今生受者是；欲知来世果，今生作者是。——三世因果经"
+        ];
+        
+        // --- Random Quote Generation and Display (Language-Aware) ---
+        const initialQuoteEl = document.getElementById('initial-quote');
+        const INITIAL_QUOTE_SYSTEM_PROMPT = "你是一位充满智慧的佛家大师。请根据佛经或禅宗思想，为用户提供一句简短的、如同幸运饼干般的、给人力量的格言。如果用户未指定语言，请使用中文。如果用户指定了语言，请用目标语言提供格言和出处（如果适用）。回复必须只有格言和出处，中间用 '——' 分隔。例如: '菩提本无树，明镜亦非台——六祖慧能'";
+
+        /**
+         * Uses Gemini API to generate a wisdom quote in the detected language.
+         * @param {string} lang - The detected language code (e.g., 'en-US', 'zh-CN').
+         * @returns {Promise<string|null>} Generated quote string or null on failure.
+         */
+        const getInitialWisdomQuote = async (lang) => {
+            if (API_KEY === "") {
+                return null; // Skip API call if key is missing
+            }
+            
+            const userPrompt = `为我生成一句佛经智慧格言。目标语言是: ${lang}。`;
+            
+            const payload = {
+                contents: [{ parts: [{ text: userPrompt }] }],
+                systemInstruction: {
+                    parts: [{ text: INITIAL_QUOTE_SYSTEM_PROMPT }]
+                },
+            };
+
+            const maxRetries = 3;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                         if (response.status === 429 && attempt < maxRetries - 1) {
+                            const delay = Math.pow(2, attempt) * 1000;
+                            await new Promise(res => setTimeout(res, delay));
+                            continue; // Retry
+                        }
+                        throw new Error(`API error: ${response.statusText}`);
+                    }
+
+                    const result = await response.json();
+                    return result.candidates?.[0]?.content?.parts?.[0]?.text;
+                } catch (error) {
+                    console.error(`Attempt ${attempt + 1}: Gemini API call for quote failed:`, error);
+                    if (attempt === maxRetries - 1) {
+                        return null; // Return null on final failure
+                    }
+                }
+            }
+        };
+
+        const setInitialQuote = async () => {
+            // Detect user language
+            const detectedLang = navigator.language || navigator.userLanguage || 'zh-CN';
+            console.log("Detected language:", detectedLang);
+            
+            // Show loading placeholder while API call is in progress
+            initialQuoteEl.innerHTML = `
+                <div class="text-4xl md:text-6xl font-bold tracking-tight mb-8 text-gray-400 animate-pulse">
+                    正在汲取智慧...
+                </div>
+                <div class="text-xl md:text-2xl text-zen-gold">
+                    Loading...
+                </div>
+            `;
+            
+            let quoteText = await getInitialWisdomQuote(detectedLang);
+
+            // Fallback logic
+            if (!quoteText) {
+                console.warn("API quote generation failed or skipped. Using local Chinese quote fallback.");
+                const randomIndex = Math.floor(Math.random() * chineseQuotes.length);
+                quoteText = chineseQuotes[randomIndex];
+            }
+            
+            const parts = quoteText.split('——');
+            const quote = parts[0] || '心中有爱，世界永恒';
+            const source = parts[1] || '【佛经智慧】';
+            
+            initialQuoteEl.innerHTML = `
+                <div class="text-4xl md:text-6xl font-bold tracking-tight mb-8">
+                    ${quote}
+                </div>
+                <div class="text-xl md:text-2xl text-zen-gold">
+                    ${source}
+                </div>
+            `;
+        };
+
+        // --- Wish Mountain (Firestore) Logic ---
+        const wishListEl = document.getElementById('wish-list');
+        const wishInput = document.getElementById('wish-input');
+        const wishSubmitBtn = document.getElementById('wish-submit-btn');
+        const wishForm = document.getElementById('wish-form');
+        
+        const setupWishMountainListener = (dbInstance) => {
+            const path = `artifacts/${appId}/public/data/wishes`;
+            // NOTE: orderBy is used here only for timestamp, which is generally acceptable 
+            // but for complex querying might require indexing.
+            const q = query(collection(dbInstance, path), orderBy("timestamp", "desc"), limit(20));
+
+            onSnapshot(q, (snapshot) => {
+                wishListEl.innerHTML = ''; // Clear existing wishes
+                let fragment = document.createDocumentFragment();
+
+                snapshot.docs.forEach(docSnapshot => {
+                    const wish = docSnapshot.data();
+                    const time = wish.timestamp ? new Date(wish.timestamp.toDate()).toLocaleString('zh-CN', { 
+                        year: 'numeric', month: '2-digit', day: '2-digit', 
+                        hour: '2-digit', minute: '2-digit' 
+                    }) : '刚刚';
+
+                    const wishElement = document.createElement('div');
+                    wishElement.className = "p-4 border-b border-zen-sand last:border-b-0 bg-white/50 backdrop-blur-sm rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300";
+                    // Display full user ID for multi-user context
+                    wishElement.innerHTML = `
+                        <p class="text-lg text-zen-ink whitespace-pre-wrap">${wish.content}</p>
+                        <div class="text-xs mt-2 text-gray-500 flex justify-between">
+                            <span>许愿者ID: ${wish.userId}</span> 
+                            <span>${time}</span>
+                        </div>
+                    `;
+                    fragment.appendChild(wishElement);
+                });
+                
+                wishListEl.appendChild(fragment);
+            }, (error) => {
+                console.error("Error listening to Wish Mountain:", error);
+                wishListEl.innerHTML = '<p class="text-red-500">无法连接到许愿山，请稍后重试。</p>';
+            });
+        };
+
+        wishForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const wishContent = wishInput.value.trim();
+            if (!wishContent || !db || !userId) {
+                return;
+            }
+
+            wishSubmitBtn.disabled = true;
+            wishSubmitBtn.textContent = '许愿中...';
+
+            try {
+                const path = `artifacts/${appId}/public/data/wishes`;
+                await addDoc(collection(db, path), {
+                    content: wishContent,
+                    userId: userId,
+                    timestamp: serverTimestamp()
+                });
+                wishInput.value = ''; // Clear input
+                console.log("Wish added successfully.");
+            } catch (error) {
+                console.error("Error adding wish:", error);
+                showCustomMessage("许愿失败，请检查网络连接或稍后重试。");
+            } finally {
+                wishSubmitBtn.disabled = false;
+                wishSubmitBtn.textContent = '发送你的愿望';
+            }
+        });
+
+        // --- AI Butler (Gemini API) Logic ---
+        const aiChatBox = document.getElementById('ai-chat-box');
+        const aiInput = document.getElementById('ai-input');
+        const aiForm = document.getElementById('ai-form');
+        const aiStatus = document.getElementById('ai-status');
+
+        const systemPrompt = "你是一位充满慈悲和智慧的佛家大师，以简洁、温和、富有哲理的方式提供人生指导。所有回答必须基于佛法或禅宗的智慧，避免直接的世俗建议，而是引导对方从心性上找到答案。每次回复不超过100字。";
+        
+        const createMessage = (text, sender) => {
+            const messageEl = document.createElement('div');
+            messageEl.className = `p-3 rounded-lg max-w-[85%] mb-4 shadow-md ${sender === 'user' ? 'self-end bg-zen-gold/10 text-zen-ink' : 'self-start bg-zen-sand text-zen-ink'}`;
+            messageEl.textContent = text;
+            aiChatBox.appendChild(messageEl);
+            aiChatBox.scrollTop = aiChatBox.scrollHeight;
+        };
+
+        const generateAIResponse = async (prompt) => {
+            aiStatus.textContent = 'AI大师思考中...';
+            aiStatus.classList.remove('hidden');
+
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+            };
+
+            const maxRetries = 3;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 429 && attempt < maxRetries - 1) {
+                            const delay = Math.pow(2, attempt) * 1000;
+                            await new Promise(res => setTimeout(res, delay));
+                            continue; // Retry
+                        }
+                        throw new Error(`API error: ${response.statusText}`);
+                    }
+
+                    const result = await response.json();
+                    const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "抱歉，大师此刻正在闭关，请稍后再试。";
+                    createMessage(text, 'ai');
+                    break; // Success
+                } catch (error) {
+                    console.error("Gemini API call failed:", error);
+                    if (attempt === maxRetries - 1) {
+                        createMessage("网络连接或API调用失败，请检查控制台。", 'ai');
+                    }
+                }
+            }
+
+            aiStatus.classList.add('hidden');
+        };
+
+        aiForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const userQuery = aiInput.value.trim();
+            if (!userQuery) return;
+
+            createMessage(userQuery, 'user');
+            aiInput.value = '';
+            generateAIResponse(userQuery);
+        });
+        
+        // --- Main App Logic and Initialization ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Must await setInitialQuote since it fetches content via API
+            await setInitialQuote(); 
+            initFirebase();
+            
+            // Initial AI greeting (Can be customized to be language-aware later if needed)
+            createMessage("欢迎来到禅意画布。吾乃此地AI管家，可为您答疑解惑。请问您心中有何困惑或向往？", 'ai');
+        });
+    </script>
+    
+    <!-- 用户ID显示区域 -->
+    <div class="fixed top-2 right-4 text-xs text-gray-400 z-50">
+        User ID: <span id="user-id-display">Loading...</span>
     </div>
-  </div>
 
-  <script src="https://unpkg.com/@panzoom/panzoom@9.4.0/dist/panzoom.min.js"></script>
-  <script>
-    const canvas = document.getElementById('canvas');
-    const panzoom = Panzoom(canvas, { maxScale: 4, minScale: 0.3, contain: 'outside' });
-    document.getElementById('viewport').addEventListener('wheel', panzoom.zoomWithWheel);
+    <!-- 主画布区域 (Main Canvas) -->
+    <div id="main-canvas" class="min-h-screen flex flex-col justify-center items-center p-8 transition-all duration-700">
+        
+        <!-- 顶部引导语和分享按钮 -->
+        <div class="text-center mb-16 max-w-4xl w-full">
+            <div id="initial-quote" class="text-center mb-8">
+                <!-- Quote will be injected here by JS -->
+            </div>
+            
+            <div class="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
+                <button onclick="copyQuote()" class="px-6 py-3 bg-zen-gold text-white font-semibold rounded-full shadow-lg hover:shadow-xl hover:bg-zen-gold/90 transition-all duration-300 transform hover:scale-[1.02]">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M15 8a3 3 0 10-2.977-2.977l-1.571 1.571A5 5 0 0118 10a5 5 0 01-4.757 4.908l1.571-1.571A3 3 0 1015 8zM5.5 10a.5.5 0 000 1h2.5a.5.5 0 000-1H5.5z" /><path fill-rule="evenodd" d="M3 10a7 7 0 1114 0 7 7 0 01-14 0zm8-4a1 1 0 10-2 0 1 1 0 002 0z" clip-rule="evenodd" /></svg>
+                    将此智慧送给朋友
+                </button>
+            </div>
+        </div>
 
-    // 随机佛经智慧
-    const wisdoms = [
-      "一切有为法，如梦幻泡影，如露亦如电，应作如是观。",
-      "莫向外求，心静自明。",
-      "诸行无常，是生灭法；生灭灭已，寂灭为乐。",
-      "心净则佛土净。",
-      "善护念者，必得安乐。"
-    ];
-    document.getElementById("wisdomText").innerText = wisdoms[Math.floor(Math.random() * wisdoms.length)];
+        <!-- 四个岛屿区域 (Islands) -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl w-full mt-12">
+            
+            <!-- 岛屿 1: AI 管家 -->
+            <div id="island-ai" onclick="showOverlay('ai')" class="island-card bg-zen-sand p-6 rounded-3xl text-center flex flex-col items-center justify-center min-h-[150px]">
+                <span class="text-4xl mb-2">🧘</span>
+                <h3 class="text-xl font-semibold">AI 管家</h3>
+                <p class="text-sm text-gray-600">— 智慧问询 —</p>
+            </div>
 
-    // zoom 到区域
-    function zoomTo(el, detailText) {
-      const rect = el.getBoundingClientRect();
-      const vp = document.getElementById('viewport').getBoundingClientRect();
-      const scale = 2.5;
-      const x = ((vp.width / 2) - (rect.left + rect.width / 2)) / scale;
-      const y = ((vp.height / 2) - (rect.top + rect.height / 2)) / scale;
-      panzoom.zoom(scale, { animate: true });
-      panzoom.pan(x, y, { animate: true });
+            <!-- 岛屿 2: 许愿山 -->
+            <div id="island-wish" onclick="showOverlay('wish')" class="island-card bg-zen-sand p-6 rounded-3xl text-center flex flex-col items-center justify-center min-h-[150px]">
+                <span class="text-4xl mb-2">⛰️</span>
+                <h3 class="text-xl font-semibold">许愿山</h3>
+                <p class="text-sm text-gray-600">— 倾听众生 —</p>
+            </div>
 
-      // 显示详情
-      setTimeout(() => {
-        alert(detailText); // 后面可以换成对话框 / 瀑布留言板 / 商店UI / 奇人馆
-      }, 600);
-    }
+            <!-- 岛屿 3: 商店 (黄纸购买) -->
+            <div id="island-store" onclick="showOverlay('store')" class="island-card bg-zen-sand p-6 rounded-3xl text-center flex flex-col items-center justify-center min-h-[150px]">
+                <span class="text-4xl mb-2">🛍️</span>
+                <h3 class="text-xl font-semibold">法物流通</h3>
+                <p class="text-sm text-gray-600">— 黄纸供养 —</p>
+            </div>
 
-    document.getElementById("island1").addEventListener("mouseenter", () => zoomTo(island1, "这里是 🤖 AI 管家，你可以与智慧对话。"));
-    document.getElementById("island2").addEventListener("mouseenter", () => zoomTo(island2, "🗻 许愿山：在此留言许愿，如同瀑布般流淌。"));
-    document.getElementById("island3").addEventListener("mouseenter", () => zoomTo(island3, "🛍️ 商店：黄纸售卖界面。"));
-    document.getElementById("island4").addEventListener("mouseenter", () => zoomTo(island4, "🏯 不周山：奇人异士的故事馆。"));
+            <!-- 岛屿 4: 不周山 (奇人异士) -->
+            <div id="island-buzhou" onclick="showOverlay('buzhou')" class="island-card bg-zen-sand p-6 rounded-3xl text-center flex flex-col items-center justify-center min-h-[150px]">
+                <span class="text-4xl mb-2">✨</span>
+                <h3 class="text-xl font-semibold">不周山</h3>
+                <p class="text-sm text-gray-600">— 奇人异志 —</p>
+            </div>
+        </div>
+    </div>
 
-    // 点击空白处回到总览
-    canvas.addEventListener("click", e => {
-      if (e.target === canvas) {
-        panzoom.reset({ animate: true });
-      }
-    });
-  </script>
+    <!-- 放大区域/浮窗 (Overlays) -->
+
+    <!-- Overlay 1: AI 管家 (AI Butler) -->
+    <div id="overlay-ai" class="zoom-overlay fixed inset-0 bg-white/95 backdrop-blur-md flex justify-center items-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl p-6 w-full max-w-2xl h-full max-h-[80vh] flex flex-col">
+            <h2 class="text-3xl font-bold text-zen-gold border-b pb-3 mb-4 flex justify-between items-center">
+                AI 管家: 禅定问答
+                <button onclick="hideOverlay('ai')" class="text-gray-400 hover:text-zen-gold transition-colors text-2xl leading-none">&times;</button>
+            </h2>
+            <div id="ai-chat-box" class="flex-grow overflow-y-auto p-4 space-y-4 flex flex-col bg-zen-sand/30 rounded-xl mb-4">
+                <!-- Chat messages here -->
+            </div>
+            
+            <p id="ai-status" class="hidden text-sm text-center text-zen-gold mb-2">AI大师思考中...</p>
+            
+            <form id="ai-form" class="flex">
+                <input type="text" id="ai-input" placeholder="输入您心中的困惑..." class="flex-grow p-3 border border-gray-300 rounded-l-full focus:outline-none focus:ring-2 focus:ring-zen-gold" required>
+                <button type="submit" class="px-6 py-3 bg-zen-gold text-white font-semibold rounded-r-full hover:bg-zen-gold/90 transition-colors">
+                    提问
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Overlay 2: 许愿山 (Wish Mountain) -->
+    <div id="overlay-wish" class="zoom-overlay fixed inset-0 bg-white/95 backdrop-blur-md flex justify-center items-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl p-6 w-full max-w-3xl h-full max-h-[80vh] flex flex-col">
+            <h2 class="text-3xl font-bold text-zen-gold border-b pb-3 mb-4 flex justify-between items-center">
+                许愿山: 众生心愿
+                <button onclick="hideOverlay('wish')" class="text-gray-400 hover:text-zen-gold transition-colors text-2xl leading-none">&times;</button>
+            </h2>
+            
+            <!-- 许愿列表 (Waterfall effect) -->
+            <div id="wish-list" class="flex-grow overflow-y-auto p-4 space-y-3 bg-zen-sand/30 rounded-xl mb-4">
+                <div class="text-center text-gray-500">加载中... 请稍候片刻，或许下您的心愿。</div>
+            </div>
+            
+            <!-- 许愿表单 -->
+            <form id="wish-form" class="flex flex-col">
+                <textarea id="wish-input" placeholder="留下您的心愿、困惑或祝福 (不超过100字)..." rows="3" class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-zen-gold mb-3 resize-none" required maxlength="100"></textarea>
+                <button type="submit" id="wish-submit-btn" class="w-full py-3 bg-zen-ink text-white font-semibold rounded-xl shadow-md hover:bg-zen-ink/90 transition-colors">
+                    发送你的愿望
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Overlay 3: 法物流通 (Store - Yellow Paper) -->
+    <div id="overlay-store" class="zoom-overlay fixed inset-0 bg-white/95 backdrop-blur-md flex justify-center items-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl p-6 w-full max-w-xl h-auto flex flex-col">
+            <h2 class="text-3xl font-bold text-zen-gold border-b pb-3 mb-4 flex justify-between items-center">
+                法物流通: 许愿材料
+                <button onclick="hideOverlay('store')" class="text-gray-400 hover:text-zen-gold transition-colors text-2xl leading-none">&times;</button>
+            </h2>
+            <div class="space-y-6">
+                <div class="flex items-center space-x-4">
+                    <img src="https://placehold.co/100x100/DAA520/FFFFFF?text=黄纸" alt="黄纸" class="rounded-lg shadow-md">
+                    <div>
+                        <h3 class="text-2xl font-semibold">高品质许愿黄纸</h3>
+                        <p class="text-gray-600">精选上等黄纸，用于书写心愿，心诚则灵。</p>
+                        <p class="text-xl font-bold text-zen-gold mt-2">￥9.99 / 10张</p>
+                    </div>
+                </div>
+                <div class="p-4 bg-zen-sand/50 rounded-xl text-center">
+                    <p class="font-medium mb-3">此为模拟交易界面，旨在表达心意。</p>
+                    <button class="w-full py-3 bg-zen-ink text-white font-semibold rounded-xl hover:bg-zen-ink/90 transition-colors">
+                        立即结缘 (模拟购买)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overlay 4: 不周山 (Buzhou Mountain - Stories) -->
+    <div id="overlay-buzhou" class="zoom-overlay fixed inset-0 bg-white/95 backdrop-blur-md flex justify-center items-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl p-6 w-full max-w-4xl h-full max-h-[80vh] flex flex-col">
+            <h2 class="text-3xl font-bold text-zen-gold border-b pb-3 mb-4 flex justify-between items-center">
+                不周山: 奇人异士录
+                <button onclick="hideOverlay('buzhou')" class="text-gray-400 hover:text-zen-gold transition-colors text-2xl leading-none">&times;</button>
+            </h2>
+            <div class="flex-grow overflow-y-auto p-4 space-y-8">
+                
+                <div class="p-4 bg-zen-sand/30 rounded-xl shadow-md">
+                    <h3 class="text-2xl font-semibold mb-2">【首位记录者】山中老僧：无名之境</h3>
+                    <img src="https://placehold.co/800x200/5A6D5A/FFFFFF?text=未来放置图片或视频" alt="占位图" class="w-full h-48 object-cover rounded-lg my-3">
+                    <p class="text-gray-700">老僧在不周山闭关三十载，未曾开口言语。他只留下一幅字：“放下”——两个字，道尽世间万般法。他的故事不是关于修行，而是关于存在本身。留待您日后发现更多影像与文字。</p>
+                </div>
+
+                <div class="p-4 bg-zen-sand/30 rounded-xl shadow-md">
+                    <h3 class="text-2xl font-semibold mb-2">【待续】云游道人：以梦入道</h3>
+                    <p class="text-gray-700">此处将记录一位能够进入他人梦境，以佛法点化迷津的云游道人的故事。他居无定所，行踪不定，唯有心诚者，方能在梦中相遇。敬请期待您未来亲自上传的奇人异士事迹。</p>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- General UI/Interaction Functions ---
+        const overlays = {
+            'ai': document.getElementById('overlay-ai'),
+            'wish': document.getElementById('overlay-wish'),
+            'store': document.getElementById('overlay-store'),
+            'buzhou': document.getElementById('overlay-buzhou'),
+        };
+
+        function showOverlay(islandName) {
+            document.body.style.overflow = 'hidden'; // Lock background scroll
+            const overlay = overlays[islandName];
+            if (overlay) {
+                overlay.classList.add('active');
+            }
+        }
+
+        function hideOverlay(islandName) {
+            const overlay = overlays[islandName];
+            if (overlay) {
+                overlay.classList.remove('active');
+            }
+            document.body.style.overflow = 'auto'; // Re-enable background scroll
+        }
+
+        function copyQuote() {
+            const quoteText = document.getElementById('initial-quote').textContent.trim();
+            
+            // Fallback for secure copy in iframe environments
+            const tempInput = document.createElement('textarea');
+            tempInput.value = `[禅意画布] 愿此智慧与你同在：${quoteText}`;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                const msg = successful ? '已复制到剪贴板，快分享给朋友吧！' : '复制失败，请手动复制。';
+                
+                // Show custom alert box instead of window.alert()
+                showCustomMessage(msg);
+                
+            } catch (err) {
+                console.error('Copy failed:', err);
+                showCustomMessage('复制失败，请手动复制。');
+            }
+            
+            document.body.removeChild(tempInput);
+        }
+
+        // Custom Message Box (replacing alert())
+        function showCustomMessage(message) {
+            let msgBox = document.getElementById('custom-message-box');
+            if (!msgBox) {
+                msgBox = document.createElement('div');
+                msgBox.id = 'custom-message-box';
+                msgBox.className = 'fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-zen-ink text-white p-4 rounded-xl shadow-2xl transition-opacity duration-300 opacity-0 z-[100]';
+                document.body.appendChild(msgBox);
+            }
+            
+            msgBox.textContent = message;
+            msgBox.classList.remove('opacity-0');
+            
+            setTimeout(() => {
+                msgBox.classList.add('opacity-0');
+            }, 3000); // Hide after 3 seconds
+        }
+
+        // Add event listeners for key press to close overlays (optional, for desktop feel)
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                for (const key in overlays) {
+                    if (overlays[key].classList.contains('active')) {
+                        hideOverlay(key);
+                        break;
+                    }
+                }
+            }
+        });
+        
+    </script>
 </body>
 </html>
