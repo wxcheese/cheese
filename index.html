@@ -41,39 +41,14 @@
         }
     </style>
     
-    <!-- 核心 JavaScript 逻辑：格言获取、一期一会编号 -->
+    <!-- 核心 JavaScript 逻辑：格言获取 -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        // 引入事务 (runTransaction) 来确保计数器准确性
-        import { getFirestore, doc, getDoc, setDoc, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // --- Global Configuration ---
         const GEMINI_API_URL_TEXT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=';
         const GEMINI_API_KEY = ""; // Canvas will provide key at runtime
         
-        // 简化路径：只使用一个全局计数器文档
-        const COUNTER_DOC_PATH = "artifacts/global/counters/visitor_count";
-        const USER_VISIT_COLLECTION = "artifacts/global/visits"; 
-
-        let db;
-        let auth;
-        let app; // Global declaration for app instance
-        let isCounterInitialized = false; 
-
-        // ----------------------------------------------------
-        // ** 🚨 REAL FIREBASE CONFIGURATION AREA 🚨 **
-        // ----------------------------------------------------
-        // When deploying to Vercel, ensure this object contains your actual keys.
-        const REAL_FIREBASE_CONFIG = {
-          apiKey: "AIzaSyC5yS2OFfbhX7qA37CJGMMtWNYu96RYM",
-          authDomain: "semiotic-sylph-418318.firebaseapp.com",
-          projectId: "semiotic-sylph-418318",
-          storageBucket: "semiotic-sylph-418318.appspot.com",
-          messagingSenderId: "788592797598",
-          appId: "1:788592797598:web:fcbc0f2b38d4c365e2ff67"
-        };
-        // ----------------------------------------------------
+        // 移除了所有 Firebase 相关的配置和变量
 
 
         /**
@@ -101,103 +76,8 @@
             }
         }
         
-        /**
-         * Initializes Firebase and starts auth process.
-         */
-        async function initializeFirebase() {
-            try {
-                let firebaseConfig = null;
-                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
-                const canvasConfigExists = typeof __firebase_config !== 'undefined';
-                
-                // --- Start of Configuration Priority Fix ---
-                if (initialAuthToken && canvasConfigExists) {
-                    // Scenario 1: Canvas environment is active. Use its paired config and token.
-                    // This is the most reliable config in Canvas when a token is present.
-                    firebaseConfig = JSON.parse(__firebase_config);
-                } else if (REAL_FIREBASE_CONFIG && REAL_FIREBASE_CONFIG.projectId) {
-                    // Scenario 2: Deployment environment (Vercel). Use the user's hardcoded config.
-                    firebaseConfig = REAL_FIREBASE_CONFIG;
-                } else if (canvasConfigExists) {
-                    // Scenario 3: Fallback to Canvas config if REAL_FIREBASE_CONFIG is missing
-                    firebaseConfig = JSON.parse(__firebase_config);
-                }
-                // --- End of Configuration Priority Fix ---
-
-
-                if (!firebaseConfig) {
-                    console.error("Firebase configuration is missing.");
-                    return;
-                }
-
-                app = initializeApp(firebaseConfig); 
-                db = getFirestore(app);
-                auth = getAuth(app);
-                
-                // Authentication Logic
-                if (initialAuthToken) {
-                    // Use the secure token provided by the Canvas environment (prevents API key error)
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    // Sign in anonymously for deployment environments (Vercel)
-                    await signInAnonymously(auth);
-                }
-
-                // Listen for auth state changes to get the UID
-                onAuthStateChanged(auth, async (user) => {
-                    if (user && !isCounterInitialized) {
-                        isCounterInitialized = true;
-                        await initializeCounter(user.uid);
-                    }
-                });
-
-            } catch (e) {
-                console.error("Error initializing Firebase:", e);
-                document.getElementById('user-counter').textContent = '#Auth-Error';
-            }
-        }
+        // 移除了 initializeFirebase 和 initializeCounter 函数
         
-        /**
-         * 检查用户是否已访问过，并分配或读取序号。
-         */
-        async function initializeCounter(uid) {
-            try {
-                const counterRef = doc(db, COUNTER_DOC_PATH);
-                const visitorRef = doc(db, USER_VISIT_COLLECTION, uid);
-                const counterElement = document.getElementById('user-counter');
-
-                let currentNumber;
-                let visitorDoc = await getDoc(visitorRef);
-
-                // 如果用户是首次访问 (UID在访问记录中不存在)
-                if (!visitorDoc.exists()) {
-                    
-                    // 首次访问：使用事务安全地递增全局计数器
-                    currentNumber = await runTransaction(db, async (transaction) => {
-                        const snap = await transaction.get(counterRef);
-                        let newCount = snap.exists() ? snap.data().value + 1 : 1;
-                        
-                        // 更新全局计数器
-                        transaction.set(counterRef, { value: newCount });
-                        // 记录用户访问序号
-                        transaction.set(visitorRef, { serial: newCount });
-                        
-                        return newCount;
-                    });
-                    
-                } else {
-                    // 重复访客：读取他们已分配的编号
-                    currentNumber = visitorDoc.data().serial || 0; 
-                }
-
-                counterElement.textContent = `#${currentNumber}`;
-                
-            } catch (e) {
-                console.error("Error initializing counter:", e);
-                document.getElementById('user-counter').textContent = '#DB-Error';
-            }
-        }
-
 
         /**
          * Fetches the random English Zen quote using Gemini API.
@@ -235,7 +115,7 @@
         
         // Launch application upon window load
         window.onload = function() {
-             initializeFirebase(); 
+             // 仅调用获取格言的函数
              fetchInitialWisdom();
         };
 
@@ -243,13 +123,7 @@
 </head>
 <body>
 
-    <!-- Top Bar: Serial Number -->
-    <header class="fixed top-4 right-4 z-10 p-4">
-        <div class="text-right flex flex-col items-end">
-            <!-- Serial number only -->
-            <p id="user-counter" class="text-xl font-extrabold text-zen-gold">#Loading</p>
-        </div>
-    </header>
+    <!-- 移除了 Top Bar: Serial Number -->
 
     <!-- Main Canvas Content: Pure Quote -->
     <div class="wisdom-container">
