@@ -33,10 +33,10 @@
         }
         /* 动画 */
         .fade-in {
-            animation: fadeIn 0.8s ease-out;
+            animation: fadeIn 1.2s ease-out forwards; /* 动画更慢、更平滑 */
         }
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
+            from { opacity: 0; transform: translateY(15px); }
             to { opacity: 1; transform: translateY(0); }
         }
         #wisdom-quote {
@@ -48,14 +48,16 @@
         }
         #explanation {
             min-height: 50px; /* 保持布局稳定 */
+            transition: opacity 0.5s ease;
         }
     </style>
     
-    <!-- 核心 JavaScript 逻辑：格言获取、多语言支持、一期一会编号 -->
+    <!-- 核心 JavaScript 逻辑：格言获取、一期一会编号 -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // 引入事务 (runTransaction) 来确保计数器准确性
+        import { getFirestore, doc, getDoc, setDoc, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // --- Global Configuration ---
         const GEMINI_API_URL_TEXT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=';
@@ -66,6 +68,7 @@
 
         let db;
         let auth;
+        let isCounterInitialized = false; // 标记是否已尝试获取编号
 
         // ----------------------------------------------------
         // ** 🚨 REAL FIREBASE CONFIGURATION AREA for the counter 🚨 **
@@ -140,7 +143,8 @@
 
                 // Listen for auth state changes
                 onAuthStateChanged(auth, async (user) => {
-                    if (user) {
+                    if (user && !isCounterInitialized) { // 仅在未初始化时运行
+                        isCounterInitialized = true;
                         const userId = user.uid;
                         await initializeCounter(appId, userId); // Initialize and fetch serial number
                     }
@@ -152,50 +156,40 @@
         }
         
         /**
-         * Initializes or fetches the "One Chance Encounter" serial number.
+         * 使用 Firestore 事务确保访问编号的唯一性和累积性。
          */
         async function initializeCounter(appId, uid) {
             try {
                 const counterRef = doc(db, COUNTER_PATH);
                 const visitorRef = doc(db, VISITOR_COLLECTION, uid);
-                
-                const visitorDoc = await getDoc(visitorRef);
-                
+                const counterElement = document.getElementById('user-counter');
+
                 let currentNumber;
+                let visitorDoc = await getDoc(visitorRef);
 
-                // If new visitor, increment global counter
-                if (!visitorDoc.exists() || !visitorDoc.data().lastVisit) {
+                // 检查访客是否是首次访问 (基于是否存在记录)
+                if (!visitorDoc.exists()) {
                     
-                    // Listen to global counter for real-time update
-                    onSnapshot(counterRef, async (docSnap) => {
-                        let count = docSnap.exists() ? docSnap.data().value : 0;
-                        currentNumber = count + 1; // Increment
-
-                        const counterElement = document.getElementById('user-counter');
-                        if (counterElement) {
-                            counterElement.textContent = `#${currentNumber}`;
-                        }
+                    // 首次访问：使用事务递增全局计数器
+                    currentNumber = await runTransaction(db, async (transaction) => {
+                        const snap = await transaction.get(counterRef);
+                        let newCount = snap.exists() ? snap.data().value + 1 : 1;
                         
-                        // Ensure atomic increment
-                        if (!docSnap.exists() || docSnap.data().value === count) {
-                             await setDoc(counterRef, { value: currentNumber });
-                        }
+                        transaction.set(counterRef, { value: newCount });
+                        transaction.set(visitorRef, { userId: uid, lastVisit: Date.now(), serial: newCount });
+                        
+                        return newCount;
                     });
-
-                } else {
-                    // If returning visitor, display a placeholder serial number
-                    const lastNum = visitorDoc.data().lastVisit % 10000 + 1;
-                    currentNumber = lastNum;
                     
-                    const counterElement = document.getElementById('user-counter');
-                    if (counterElement) {
-                        counterElement.textContent = `#${currentNumber}`;
-                    }
+                } else {
+                    // 重复访客：读取他们已分配的编号
+                    currentNumber = visitorDoc.data().serial || (visitorDoc.data().lastVisit % 10000 + 1); 
+                    // 确保更新访问时间
+                    await setDoc(visitorRef, { lastVisit: Date.now() }, { merge: true });
                 }
-                
-                // Ensure visitor document exists
-                await setDoc(visitorRef, { userId: uid, lastVisit: Date.now() }, { merge: true });
 
+                counterElement.textContent = `#${currentNumber}`;
+                
             } catch (e) {
                 console.error("Error initializing counter:", e);
                 const counterElement = document.getElementById('user-counter');
@@ -205,14 +199,16 @@
             }
         }
 
+
         /**
          * Fetches the initial Zen quote (now fixed to English).
+         * 稳定显示格言，只在获取到新内容后更新。
          */
         async function fetchInitialWisdom() {
-            // Language is FIXED to English as requested
+            const quoteElement = document.getElementById('wisdom-quote');
             const targetLang = 'English';
             
-            // System prompt updated to strictly ask for English
+            // 系统提示确保内容简洁且固定为英文
             const systemPrompt = `You are a supremely wise Zen master. Provide a concise, profound ${targetLang} phrase or sentence for guidance and introspection for the day. The quote MUST NOT be longer than 20 characters (including spaces). Do not include any punctuation, sources, or quotation marks.`;
             const userQuery = "Give me a maxim about the present moment or minimalism.";
             
@@ -226,12 +222,14 @@
                 const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || 
                              "The present moment is your final master"; // English fallback
                 
-                document.getElementById('wisdom-quote').textContent = text.trim();
-                document.getElementById('wisdom-quote').classList.add('fade-in');
+                // 仅在获取到文本后设置内容并触发淡入动画
+                quoteElement.textContent = text.trim();
+                quoteElement.classList.add('fade-in');
                 
             } catch (e) {
                 console.error("Error fetching wisdom quote:", e);
-                document.getElementById('wisdom-quote').textContent = "The present moment is your final master"; // English fallback
+                quoteElement.textContent = "The present moment is your final master"; // English fallback
+                quoteElement.classList.add('fade-in'); 
             }
         }
 
@@ -241,13 +239,18 @@
         async function explainQuote() {
             const quote = document.getElementById('wisdom-quote').textContent;
             const explanationEl = document.getElementById('explanation');
-            const originalText = explanationEl.textContent;
             
             if (explanationEl.dataset.loading === 'true') return;
 
+            // 检查是否已经有内容，有则隐藏
+            if (explanationEl.textContent && explanationEl.textContent.startsWith('✨ Deepening') === false) {
+                 explanationEl.textContent = '';
+                 return;
+            }
+
             // Show loading state
             explanationEl.textContent = '✨ Deepening the contemplation...';
-            explanationEl.classList.remove('text-zen-ink');
+            explanationEl.classList.remove('text-zen-ink', 'fade-in');
             explanationEl.classList.add('text-zen-gold', 'animate-pulse');
             explanationEl.dataset.loading = 'true';
             
@@ -283,6 +286,7 @@
              
              // Setup double-click listener on the quote element
              const quoteElement = document.getElementById('wisdom-quote');
+             // 修正：现在双击会触发解释/隐藏交替
              quoteElement.addEventListener('dblclick', explainQuote);
         };
 
