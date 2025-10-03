@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -39,17 +39,6 @@
             from { opacity: 0; transform: translateY(15px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        #wisdom-quote {
-            cursor: pointer; /* 提示用户可以交互 */
-            transition: color 0.3s ease;
-        }
-        #wisdom-quote:hover {
-            color: var(--zen-gold);
-        }
-        #explanation {
-            min-height: 50px; /* 保持布局稳定 */
-            transition: opacity 0.5s ease;
-        }
     </style>
     
     <!-- 核心 JavaScript 逻辑：格言获取、一期一会编号 -->
@@ -63,15 +52,17 @@
         const GEMINI_API_URL_TEXT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=';
         const GEMINI_API_KEY = ""; // Canvas will provide key at runtime
         
-        const COUNTER_PATH = "artifacts/global/counters/visitor_count";
-        const VISITOR_COLLECTION = "artifacts/global/visitors";
+        // 简化路径：只使用一个全局计数器文档
+        const COUNTER_DOC_PATH = "artifacts/global/counters/visitor_count";
+        const USER_VISIT_COLLECTION = "artifacts/global/visits"; 
 
         let db;
         let auth;
-        let isCounterInitialized = false; // 标记是否已尝试获取编号
+        let app; // Global declaration for app instance
+        let isCounterInitialized = false; 
 
         // ----------------------------------------------------
-        // ** 🚨 REAL FIREBASE CONFIGURATION AREA for the counter 🚨 **
+        // ** 🚨 REAL FIREBASE CONFIGURATION AREA 🚨 **
         // ----------------------------------------------------
         // When deploying to Vercel, ensure this object contains your actual keys.
         const REAL_FIREBASE_CONFIG = {
@@ -111,106 +102,115 @@
         }
         
         /**
-         * Initializes the Firebase application and authentication.
+         * Initializes Firebase and starts auth process.
          */
         async function initializeFirebase() {
             try {
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
                 let firebaseConfig = null;
-
-                // Priority: Canvas config (for debugging), then REAL_FIREBASE_CONFIG (for deployment)
-                if (typeof __firebase_config !== 'undefined') {
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
+                const canvasConfigExists = typeof __firebase_config !== 'undefined';
+                
+                // --- Start of Configuration Priority Fix ---
+                if (initialAuthToken && canvasConfigExists) {
+                    // Scenario 1: Canvas environment is active. Use its paired config and token.
+                    // This is the most reliable config in Canvas when a token is present.
                     firebaseConfig = JSON.parse(__firebase_config);
                 } else if (REAL_FIREBASE_CONFIG && REAL_FIREBASE_CONFIG.projectId) {
+                    // Scenario 2: Deployment environment (Vercel). Use the user's hardcoded config.
                     firebaseConfig = REAL_FIREBASE_CONFIG;
+                } else if (canvasConfigExists) {
+                    // Scenario 3: Fallback to Canvas config if REAL_FIREBASE_CONFIG is missing
+                    firebaseConfig = JSON.parse(__firebase_config);
                 }
+                // --- End of Configuration Priority Fix ---
+
 
                 if (!firebaseConfig) {
-                    console.error("Firebase configuration is missing or invalid.");
+                    console.error("Firebase configuration is missing.");
                     return;
                 }
 
-                app = initializeApp(firebaseConfig);
+                app = initializeApp(firebaseConfig); 
                 db = getFirestore(app);
                 auth = getAuth(app);
-
-                // Sign in using custom token or anonymously
-                if (typeof __initial_auth_token !== 'undefined') {
-                    await signInWithCustomToken(auth, __initial_auth_token);
+                
+                // Authentication Logic
+                if (initialAuthToken) {
+                    // Use the secure token provided by the Canvas environment (prevents API key error)
+                    await signInWithCustomToken(auth, initialAuthToken);
                 } else {
+                    // Sign in anonymously for deployment environments (Vercel)
                     await signInAnonymously(auth);
                 }
 
-                // Listen for auth state changes
+                // Listen for auth state changes to get the UID
                 onAuthStateChanged(auth, async (user) => {
-                    if (user && !isCounterInitialized) { // 仅在未初始化时运行
+                    if (user && !isCounterInitialized) {
                         isCounterInitialized = true;
-                        const userId = user.uid;
-                        await initializeCounter(appId, userId); // Initialize and fetch serial number
+                        await initializeCounter(user.uid);
                     }
                 });
 
             } catch (e) {
                 console.error("Error initializing Firebase:", e);
+                document.getElementById('user-counter').textContent = '#Auth-Error';
             }
         }
         
         /**
-         * 使用 Firestore 事务确保访问编号的唯一性和累积性。
+         * 检查用户是否已访问过，并分配或读取序号。
          */
-        async function initializeCounter(appId, uid) {
+        async function initializeCounter(uid) {
             try {
-                const counterRef = doc(db, COUNTER_PATH);
-                const visitorRef = doc(db, VISITOR_COLLECTION, uid);
+                const counterRef = doc(db, COUNTER_DOC_PATH);
+                const visitorRef = doc(db, USER_VISIT_COLLECTION, uid);
                 const counterElement = document.getElementById('user-counter');
 
                 let currentNumber;
                 let visitorDoc = await getDoc(visitorRef);
 
-                // 检查访客是否是首次访问 (基于是否存在记录)
+                // 如果用户是首次访问 (UID在访问记录中不存在)
                 if (!visitorDoc.exists()) {
                     
-                    // 首次访问：使用事务递增全局计数器
+                    // 首次访问：使用事务安全地递增全局计数器
                     currentNumber = await runTransaction(db, async (transaction) => {
                         const snap = await transaction.get(counterRef);
                         let newCount = snap.exists() ? snap.data().value + 1 : 1;
                         
+                        // 更新全局计数器
                         transaction.set(counterRef, { value: newCount });
-                        transaction.set(visitorRef, { userId: uid, lastVisit: Date.now(), serial: newCount });
+                        // 记录用户访问序号
+                        transaction.set(visitorRef, { serial: newCount });
                         
                         return newCount;
                     });
                     
                 } else {
                     // 重复访客：读取他们已分配的编号
-                    currentNumber = visitorDoc.data().serial || (visitorDoc.data().lastVisit % 10000 + 1); 
-                    // 确保更新访问时间
-                    await setDoc(visitorRef, { lastVisit: Date.now() }, { merge: true });
+                    currentNumber = visitorDoc.data().serial || 0; 
                 }
 
                 counterElement.textContent = `#${currentNumber}`;
                 
             } catch (e) {
                 console.error("Error initializing counter:", e);
-                const counterElement = document.getElementById('user-counter');
-                if (counterElement) {
-                    counterElement.textContent = '#Error';
-                }
+                document.getElementById('user-counter').textContent = '#DB-Error';
             }
         }
 
 
         /**
-         * Fetches the initial Zen quote (now fixed to English).
-         * 稳定显示格言，只在获取到新内容后更新。
+         * Fetches the random English Zen quote using Gemini API.
          */
         async function fetchInitialWisdom() {
             const quoteElement = document.getElementById('wisdom-quote');
-            const targetLang = 'English';
             
+            // 随机种子确保每次刷新获得不同的金句
+            const randomSeed = Math.random().toString(36).substring(2, 7); 
+
             // 系统提示确保内容简洁且固定为英文
-            const systemPrompt = `You are a supremely wise Zen master. Provide a concise, profound ${targetLang} phrase or sentence for guidance and introspection for the day. The quote MUST NOT be longer than 20 characters (including spaces). Do not include any punctuation, sources, or quotation marks.`;
-            const userQuery = "Give me a maxim about the present moment or minimalism.";
+            const systemPrompt = `You are a supremely wise Zen master. Provide a single, concise, profound English phrase or sentence for guidance and introspection for the day. The quote MUST NOT be longer than 20 characters (including spaces). Do not include any punctuation, sources, or quotation marks.`;
+            const userQuery = `Give me a unique maxim about the present moment, impermanence, or simplicity. Seed: ${randomSeed}`;
             
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
@@ -220,62 +220,16 @@
             try {
                 const result = await fetchWithRetry(GEMINI_API_URL_TEXT, payload);
                 const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || 
-                             "The present moment is your final master"; // English fallback
+                             "The present moment is your final master"; // Fallback
                 
-                // 仅在获取到文本后设置内容并触发淡入动画
+                // 设置内容并触发淡入动画
                 quoteElement.textContent = text.trim();
                 quoteElement.classList.add('fade-in');
                 
             } catch (e) {
                 console.error("Error fetching wisdom quote:", e);
-                quoteElement.textContent = "The present moment is your final master"; // English fallback
+                quoteElement.textContent = "The present moment is your final master"; // Fallback
                 quoteElement.classList.add('fade-in'); 
-            }
-        }
-
-        /**
-         * ✨ Gemini API Function: Provides a deeper, multi-paragraph explanation of the current quote.
-         */
-        async function explainQuote() {
-            const quote = document.getElementById('wisdom-quote').textContent;
-            const explanationEl = document.getElementById('explanation');
-            
-            if (explanationEl.dataset.loading === 'true') return;
-
-            // 检查是否已经有内容，有则隐藏
-            if (explanationEl.textContent && explanationEl.textContent.startsWith('✨ Deepening') === false) {
-                 explanationEl.textContent = '';
-                 return;
-            }
-
-            // Show loading state
-            explanationEl.textContent = '✨ Deepening the contemplation...';
-            explanationEl.classList.remove('text-zen-ink', 'fade-in');
-            explanationEl.classList.add('text-zen-gold', 'animate-pulse');
-            explanationEl.dataset.loading = 'true';
-            
-            const systemPrompt = "You are a profound Buddhist scholar and writer. Your task is to provide a detailed, concise (no more than 4 sentences) philosophical explanation of the user's provided Zen maxim. The explanation must be in clear, eloquent English, focusing on its meaning for modern life.";
-            const userQuery = `Elaborate on the Zen maxim: "${quote}"`;
-
-            const payload = {
-                contents: [{ parts: [{ text: userQuery }] }],
-                systemInstruction: { parts: [{ text: systemPrompt }] },
-            };
-
-            try {
-                const result = await fetchWithRetry(GEMINI_API_URL_TEXT, payload);
-                const explanationText = result?.candidates?.[0]?.content?.parts?.[0]?.text || "The depth of the void requires no explanation.";
-                
-                explanationEl.textContent = explanationText.trim();
-                explanationEl.classList.remove('animate-pulse');
-                explanationEl.classList.add('fade-in', 'text-zen-ink');
-
-            } catch (e) {
-                console.error("Error fetching explanation:", e);
-                explanationEl.textContent = "Silence is the answer. (API Error)";
-            } finally {
-                explanationEl.dataset.loading = 'false';
-                explanationEl.classList.remove('text-zen-gold');
             }
         }
         
@@ -283,11 +237,6 @@
         window.onload = function() {
              initializeFirebase(); 
              fetchInitialWisdom();
-             
-             // Setup double-click listener on the quote element
-             const quoteElement = document.getElementById('wisdom-quote');
-             // 修正：现在双击会触发解释/隐藏交替
-             quoteElement.addEventListener('dblclick', explainQuote);
         };
 
     </script>
@@ -302,22 +251,16 @@
         </div>
     </header>
 
-    <!-- Main Canvas Content: Pure Quote and Explanation -->
+    <!-- Main Canvas Content: Pure Quote -->
     <div class="wisdom-container">
         <!-- Main Quote -->
         <h1 id="wisdom-quote" class="text-4xl md:text-6xl font-bold text-zen-ink opacity-0 transition-opacity">
             Contemplating...
         </h1>
-        
-        <!-- Hidden/Secondary AI Explanation -->
-        <p id="explanation" class="text-lg md:text-xl text-zen-ink mt-8 max-w-2xl mx-auto"></p>
-        
-        <p class="text-xs text-gray-400 mt-4">— Double-click the maxim to unveil its deeper meaning —</p>
     </div>
     
-    <!-- Footer: Alert Message Container (Necessary placeholder) -->
+    <!-- Footer: Alert Message Container (Placeholder) -->
     <div id="alert-container" class="fixed bottom-4 right-4 z-50 flex flex-col items-end pointer-events-none">
-        <!-- Alerts will appear here -->
     </div>
 
 </body>
