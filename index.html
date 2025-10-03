@@ -14,8 +14,6 @@
             --zen-gold: #9E7B5B; /* 柔和的砂金 */
             --zen-sand: #FBF9F6; /* 接近纯白的背景 */
             --zen-ink: #333333; /* 深墨色 */
-            --zen-dark: #2C2C2C; 
-            --zen-green: #6AA84F; /* 柔和的成功绿色 */
         }
         body {
             font-family: 'Noto Serif SC', serif;
@@ -42,11 +40,36 @@
         }
     </style>
     
-    <!-- 极简 JavaScript 逻辑：仅用于获取格言和复制功能 -->
+    <!-- 核心 JavaScript 逻辑：格言获取、多语言支持、一期一会编号 -->
     <script type="module">
-
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // --- 全局配置 ---
         const GEMINI_API_URL_TEXT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=';
         const GEMINI_API_KEY = ""; // Canvas will provide key at runtime
+        
+        const COUNTER_PATH = "artifacts/global/counters/visitor_count";
+        const VISITOR_COLLECTION = "artifacts/global/visitors";
+
+        let db;
+        let auth;
+
+        // ----------------------------------------------------
+        // ** 🚨 真实 Firebase 配置区域：用于一期一会编号 🚨 **
+        // ----------------------------------------------------
+        // 部署到 Vercel 时，请确保此配置对象中填入您的真实密钥。
+        const REAL_FIREBASE_CONFIG = {
+          apiKey: "AIzaSyC5yS2OFfbhX7qA37CJGMMtWNYu96RYM",
+          authDomain: "semiotic-sylph-418318.firebaseapp.com",
+          projectId: "semiotic-sylph-418318",
+          storageBucket: "semiotic-sylph-418318.appspot.com",
+          messagingSenderId: "788592797598",
+          appId: "1:788592797598:web:fcbc0f2b38d4c365e2ff67"
+        };
+        // ----------------------------------------------------
+
 
         /**
          * 带有指数退避的 Fetch 函数
@@ -74,10 +97,113 @@
         }
         
         /**
-         * 获取初始禅意格言
+         * 初始化 Firebase 应用并进行认证
+         */
+        async function initializeFirebase() {
+            try {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                let firebaseConfig = null;
+
+                // 优先使用 Canvas 提供的配置 (方便调试)
+                if (typeof __firebase_config !== 'undefined') {
+                    firebaseConfig = JSON.parse(__firebase_config);
+                } else if (REAL_FIREBASE_CONFIG && REAL_FIREBASE_CONFIG.projectId) {
+                    // 使用用户填入的真实配置 (部署时)
+                    firebaseConfig = REAL_FIREBASE_CONFIG;
+                }
+
+                if (!firebaseConfig) {
+                    console.error("Firebase configuration is missing or invalid.");
+                    return;
+                }
+
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // 尝试用提供的 token 登录，否则匿名登录
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // 监听认证状态变化
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        const userId = user.uid;
+                        await initializeCounter(appId, userId); // 初始化并获取一期一会编号
+                    }
+                });
+
+            } catch (e) {
+                console.error("Error initializing Firebase:", e);
+            }
+        }
+        
+        /**
+         * 初始化或获取用户的“一期一会”编号
+         */
+        async function initializeCounter(appId, uid) {
+            try {
+                const counterRef = doc(db, COUNTER_PATH);
+                const visitorRef = doc(db, VISITOR_COLLECTION, uid);
+                
+                const visitorDoc = await getDoc(visitorRef);
+                
+                let currentNumber;
+
+                // 如果是新访客，递增全局计数器
+                if (!visitorDoc.exists() || !visitorDoc.data().lastVisit) {
+                    
+                    // 监听全局计数器，模拟递增
+                    onSnapshot(counterRef, async (docSnap) => {
+                        let count = docSnap.exists() ? docSnap.data().value : 0;
+                        currentNumber = count + 1; // 递增
+
+                        const counterElement = document.getElementById('user-counter');
+                        if (counterElement) {
+                            counterElement.textContent = `#${currentNumber}`;
+                        }
+                        
+                        // 确保只执行一次更新
+                        if (!docSnap.exists() || docSnap.data().value === count) {
+                             await setDoc(counterRef, { value: currentNumber });
+                        }
+                    });
+
+                } else {
+                    // 如果是重复访客，也刷新编号（简单起见，从 UID 取一个随机数）
+                    const lastNum = visitorDoc.data().lastVisit % 10000 + 1;
+                    currentNumber = lastNum;
+                    
+                    const counterElement = document.getElementById('user-counter');
+                    if (counterElement) {
+                        counterElement.textContent = `#${currentNumber}`;
+                    }
+                }
+                
+                // 确保访客文档存在
+                await setDoc(visitorRef, { userId: uid, lastVisit: Date.now() }, { merge: true });
+
+            } catch (e) {
+                console.error("Error initializing counter:", e);
+                const counterElement = document.getElementById('user-counter');
+                if (counterElement) {
+                    counterElement.textContent = '#Error';
+                }
+            }
+        }
+
+        /**
+         * 获取初始禅意格言 (支持多语言)
          */
         async function fetchInitialWisdom() {
-            const systemPrompt = "你是一位极富禅意的智者。请用一句简洁、深刻的中文短语或句子，为新的一天提供指引和内省，长度不超过20个字。不要添加任何标点符号。";
+            // 检测用户语言，若检测不到则默认使用 'en' (英文)
+            const detectedLang = (navigator.language || navigator.userLanguage || 'en').split('-')[0];
+            const targetLang = detectedLang === 'zh' ? '中文' : '英文';
+            
+            const systemPrompt = `你是一位极富禅意的智者。请用一句简洁、深刻的${targetLang}短语或句子，为新的一天提供指引和内省，长度不超过20个字。不要添加任何标点符号或来源。`;
             const userQuery = "给我一句关于当下或极简生活的格言。";
             
             const payload = {
@@ -87,100 +213,42 @@
             
             try {
                 const result = await fetchWithRetry(GEMINI_API_URL_TEXT, payload);
-                const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || "心安即是归处";
+                const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || 
+                             (targetLang === '英文' ? "The present moment is your final master" : "心安即是归处");
                 
                 document.getElementById('wisdom-quote').textContent = text.trim();
                 document.getElementById('wisdom-quote').classList.add('fade-in');
                 
             } catch (e) {
                 console.error("Error fetching wisdom quote:", e);
-                document.getElementById('wisdom-quote').textContent = "心安即是归处";
+                document.getElementById('wisdom-quote').textContent = 
+                    (targetLang === '英文' ? "The present moment is your final master" : "心安即是归处");
             }
-        }
-
-        /**
-         * 复制格言到剪贴板
-         */
-        window.copyQuote = function() {
-            const quote = document.getElementById('wisdom-quote').textContent;
-            try {
-                // 剪贴板操作
-                const textarea = document.createElement('textarea');
-                textarea.value = quote;
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
-                alertMessage("格言已复制到剪贴板！", 'success');
-            } catch (err) {
-                console.error('无法复制:', err);
-                alertMessage("复制失败，请手动选择。", 'error');
-            }
-        }
-        
-        /**
-         * 自定义消息提示（替代 alert）
-         */
-        window.alertMessage = function(message, type = 'info') {
-            const container = document.getElementById('alert-container');
-            const alertDiv = document.createElement('div');
-            
-            let bgColor = 'bg-blue-500';
-            let icon = 'ℹ️';
-
-            switch (type) {
-                case 'success':
-                    bgColor = 'bg-green-600';
-                    icon = '✅';
-                    break;
-                case 'error':
-                    bgColor = 'bg-red-600';
-                    icon = '❌';
-                    break;
-                case 'info':
-                default:
-                    bgColor = 'bg-gray-700';
-                    icon = '💡';
-                    break;
-            }
-
-            alertDiv.className = `p-4 mt-2 rounded-xl text-white shadow-xl ${bgColor} flex items-center space-x-2 fade-in`;
-            alertDiv.style.pointerEvents = 'auto';
-            alertDiv.innerHTML = `
-                <span class="text-xl">${icon}</span>
-                <p class="text-sm">${message}</p>
-            `;
-
-            container.appendChild(alertDiv);
-
-            // 自动消失
-            setTimeout(() => {
-                alertDiv.classList.remove('fade-in');
-                alertDiv.classList.add('opacity-0');
-                setTimeout(() => alertDiv.remove(), 300); 
-            }, 3000);
         }
         
         // 窗口加载完成后启动应用
         window.onload = function() {
-             // 模拟 Firebase 初始化，以获取 API key (在 Canvas 环境中)
-             fetchInitialWisdom(); 
+             initializeFirebase(); 
+             fetchInitialWisdom();
         };
 
     </script>
 </head>
 <body>
 
+    <!-- 顶栏：身份编号 (只显示编号) -->
+    <header class="fixed top-4 right-4 z-10 p-4">
+        <div class="text-right flex flex-col items-end">
+            <!-- 移除了 '一期一会' 的文本 -->
+            <p id="user-counter" class="text-xl font-extrabold text-zen-gold">#Loading</p>
+        </div>
+    </header>
+
     <!-- 主画布内容：纯粹的格言 -->
     <div class="wisdom-container">
         <h1 id="wisdom-quote" class="text-4xl md:text-6xl font-bold text-zen-ink opacity-0 transition-opacity">
             正在沉思...
         </h1>
-        
-        <button onclick="window.copyQuote()" 
-            class="mt-8 text-lg font-medium text-zen-gold hover:text-zen-dark transition hover:underline">
-            将此智慧送给朋友
-        </button>
     </div>
     
     <!-- 底部：提示消息容器 -->
